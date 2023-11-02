@@ -1,5 +1,11 @@
+#![no_std]
+
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
 use aes::{Aes128, Aes256};
+
+pub mod reexports {
+    pub use aes;
+}
 
 /// Derive-Key-AES nonce extension mechanisms.
 ///
@@ -8,11 +14,13 @@ use aes::{Aes128, Aes256};
 /// Usage with AES-128 (Derive-Key-AES-GCM):
 ///
 /// ```rust
+/// use nonce_extension::*;
+/// let key = "128-bit key here";
+/// let nonce = "extended nonce!";
 /// let encryption_key = nonce_extension_aes128(key, nonce);
 /// let zero_nonce = [0u8; 12];
-/// ````
-///
-/// and encrypt with `AES-GCM` using `encryption_key` and `zero_nonce`.
+/// // encrypt with `AES-GCM-128` using `encryption_key` and `zero_nonce`.
+/// ```
 ///
 /// The nonce can be any length up to 120 bits (15 bytes).
 ///
@@ -66,9 +74,13 @@ pub fn nonce_extension_aes128(key: impl AsRef<[u8]>, nonce: impl AsRef<[u8]>) ->
 /// Usage with AES-256 (Double-Nonce-Derive-Key-AES-GCM):
 ///
 /// ```rust
-/// let encryption_key = nonce_extension_aes128(key, nonce);
+/// use nonce_extension::*;
+/// let key = "-------- A 256-bit key! --------";
+/// let nonce = "*A random 192-bit nonce*";
+/// let encryption_key = nonce_extension_aes256(key, nonce);
 /// let zero_nonce = [0u8; 12];
-/// ````
+/// // encrypt with `AES-GCM-256` using `encryption_key` and `zero_nonce`.
+/// ```
 ///
 /// The nonce can be any length up to 232 bits, but for practical purposes, 192 bits (24 bytes)
 /// is recommended.
@@ -154,11 +166,4 @@ fn nonce_derive_aes256() {
     )
     .unwrap();
     assert_eq!(&dk[..], &expected_dk);
-}
-
-fn main() {
-    let key = [0u8; 16];
-    let nonce = [0u8; 15];
-    let k2 = nonce_extension_aes128(key, nonce);
-    dbg!(k2);
 }

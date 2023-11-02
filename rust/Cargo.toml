@@ -1,10 +1,11 @@
 [package]
 name = "nonce-extension"
-version = "0.1.0"
+version = "0.1.2"
 edition = "2021"
 readme = "README.md"
 authors = ["Frank Denis <github@pureftpd.org>"]
 keywords = ["crypto", "aes", "nonce", "derive", "key"]
+description = "Derive-Key-AES and Double-Nonce-Derive-Key-AES nonce extension mechanisms"
 license = "ISC"
 homepage = "https://github.com/jedisct1/nonce-extension"
 repository = "https://github.com/jedisct1/nonce-extension"
