@@ -1,0 +1,17 @@
+[package]
+name = "nonce-extension"
+version = "0.1.0"
+edition = "2021"
+readme = "README.md"
+authors = ["Frank Denis <github@pureftpd.org>"]
+keywords = ["crypto", "aes", "nonce", "derive", "key"]
+license = "ISC"
+homepage = "https://github.com/jedisct1/nonce-extension"
+repository = "https://github.com/jedisct1/nonce-extension"
+categories = ["no-std", "cryptography", "wasm"]
+
+[dependencies]
+aes = "0.8.3"
+
+[dev-dependencies]
+ct-codecs = "1.1.1"
