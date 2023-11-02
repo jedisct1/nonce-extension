@@ -116,6 +116,71 @@ pub fn nonceExtension(comptime BlockCipher: type, key: [BlockCipher.key_bits / 8
     return dk;
 }
 
+pub const XAes256Gcm = struct {
+    pub const key_length = 32;
+    const nonce_length = 24;
+    const tag_length = 16;
+    pub const ciphertext_overhead_length = tag_length + nonce_length;
+
+    /// Generate a random AES256 key.
+    pub fn keygen() [key_length]u8 {
+        var key: [key_length]u8 = undefined;
+        std.crypto.random.bytes(&key);
+        return key;
+    }
+
+    /// Encrypt a message with Double-Nonce-Derive-Key-AES256-GCM.
+    /// The (automatically generated) nonce and tag are automatically included in the output.
+    /// The ciphertext buffer length must be `plaintext.len + XAes256Gcm.overheader_length`.
+    pub fn encrypt(
+        key: [key_length]u8,
+        ciphertext: []u8,
+        plaintext: []const u8,
+        associated_data: ?[]const u8,
+    ) void {
+        std.debug.assert(ciphertext.len == plaintext.len + ciphertext_overhead_length); // Ciphertext buffer length must be plaintext.len + XAes256Gcm.overheader_length
+        var nonce = ciphertext[0..nonce_length];
+        var c = ciphertext[nonce_length..][0..plaintext.len];
+        var tag = ciphertext[ciphertext.len - tag_length ..][0..tag_length];
+        std.crypto.random.bytes(nonce);
+        const dk = nonceExtension(std.crypto.core.aes.Aes256, key, nonce);
+        std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(
+            c,
+            tag,
+            plaintext,
+            associated_data orelse "",
+            [_]u8{0} ** 12,
+            dk,
+        );
+    }
+
+    /// Decrypt a message with Double-Nonce-Derive-Key-AES256-GCM.
+    /// The plaintext buffer length must be `ciphertext.len - XAes256Gcm.overheader_length`.
+    pub fn decrypt(
+        key: [key_length]u8,
+        plaintext: []u8,
+        ciphertext: []const u8,
+        associated_data: ?[]const u8,
+    ) std.crypto.errors.AuthenticationError!void {
+        std.debug.assert(ciphertext.len == plaintext.len + ciphertext_overhead_length); // Plaintext buffer length must be ciphertext.len - XAes256Gcm.overheader_length
+        if (ciphertext.len < ciphertext_overhead_length) {
+            return error.AuthenticationFailed;
+        }
+        const nonce = ciphertext[0..nonce_length];
+        const c = ciphertext[nonce_length..][0..plaintext.len];
+        const tag = ciphertext[ciphertext.len - tag_length ..][0..tag_length].*;
+        const dk = nonceExtension(std.crypto.core.aes.Aes256, key, nonce);
+        try std.crypto.aead.aes_gcm.Aes256Gcm.decrypt(
+            plaintext,
+            c,
+            tag,
+            associated_data orelse "",
+            [_]u8{0} ** 12,
+            dk,
+        );
+    }
+};
+
 const aes = std.crypto.core.aes;
 const testing = std.testing;
 
@@ -141,4 +206,14 @@ test "double-nonce-derive-aes256" {
     const dk = nonceExtension(aes.Aes256, key, &nonce); // 256-bit derived key
     const expected_dk_hex = "545e7f545b925d46212c50e7df5ad33b8e650482a8e6476899ed6bb6f418e6d0";
     try testing.expectEqualSlices(u8, expected_dk_hex, &std.fmt.bytesToHex(dk, .lower));
+}
+
+test "double-nonce-derive-aes256-gcm" {
+    const key = XAes256Gcm.keygen();
+    const plaintext = "Hello, world!";
+    var ciphertext: [plaintext.len + XAes256Gcm.ciphertext_overhead_length]u8 = undefined;
+    XAes256Gcm.encrypt(key, &ciphertext, plaintext, null);
+    var decrypted: [plaintext.len]u8 = undefined;
+    try XAes256Gcm.decrypt(key, &decrypted, &ciphertext, null);
+    try testing.expectEqualSlices(u8, plaintext, &decrypted);
 }
