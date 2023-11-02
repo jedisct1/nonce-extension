@@ -104,6 +104,6 @@ fn test() {
     let key = XAes256Gcm::keygen();
     let plaintext = b"hello world";
     let ciphertext = XAes256Gcm::encrypt(&key, plaintext, None);
-    let decrypted = XAes256Gcm::decrypt(&key, &ciphertext, None).unwrap();
+    let decrypted = XAes256Gcm::decrypt(&key, ciphertext, None).unwrap();
     assert_eq!(plaintext, &decrypted[..]);
 }
