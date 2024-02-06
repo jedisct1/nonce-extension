@@ -36,6 +36,10 @@ pub struct XAes256Gcm;
 
 impl XAes256Gcm {
     /// Generates a random AES-256 key.
+    ///
+    /// # Returns
+    ///
+    /// An array of 32 bytes representing the generated key.
     pub fn keygen() -> [u8; 32] {
         let mut key = [0u8; 32];
         getrandom(&mut key).unwrap();
@@ -43,7 +47,16 @@ impl XAes256Gcm {
     }
 
     /// Encrypts a message with AES-256-GCM.
-    /// The nonce and tag are included in the output.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - A reference to a 32-byte array representing the AES-256 key.
+    /// * `plaintext` - The message to be encrypted.
+    /// * `associated_data` - Optional associated data to be authenticated but not encrypted.
+    ///
+    /// # Returns
+    ///
+    /// A vector containing the encrypted message, nonce, and tag.
     pub fn encrypt(
         key: &[u8; 32],
         plaintext: impl AsRef<[u8]>,
@@ -72,8 +85,17 @@ impl XAes256Gcm {
     }
 
     /// Decrypts a message with AES-256-GCM.
-    /// Returns `Err` if the ciphertext is too short or invalid.
-    /// Returns the plaintext otherwise.
+    ///
+    /// # Arguments
+    ///
+    /// * `key` - A reference to a 32-byte array representing the AES-256 key.
+    /// * `ciphertext` - The message to be decrypted.
+    /// * `associated_data` - Optional associated data that was authenticated but not encrypted.
+    ///
+    /// # Returns
+    ///
+    /// - `Ok(Vec<u8>)` containing the decrypted plaintext if successful.
+    /// - `Err(Error)` if the ciphertext is too short or invalid.
     pub fn decrypt(
         key: &[u8; 32],
         ciphertext: impl AsRef<[u8]>,
