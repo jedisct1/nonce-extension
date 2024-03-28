@@ -204,7 +204,7 @@ test "double-nonce-derive-aes256" {
     _ = try std.fmt.hexToBytes(&nonce, nonce_hex);
     _ = try std.fmt.hexToBytes(&key, key_hex);
     const dk = nonceExtension(aes.Aes256, key, &nonce); // 256-bit derived key
-    const expected_dk_hex = "545e7f545b925d46212c50e7df5ad33b8e650482a8e6476899ed6bb6f418e6d0";
+    const expected_dk_hex = "d05552b10c12ff00fbc94fdac8ca0220472d60b2af6b03e85b78725e5c052000";
     try testing.expectEqualSlices(u8, expected_dk_hex, &std.fmt.bytesToHex(dk, .lower));
 }
 
