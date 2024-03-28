@@ -12,6 +12,6 @@ repository = "https://github.com/jedisct1/nonce-extension"
 categories = ["no-std", "cryptography", "wasm"]
 
 [dependencies]
-nonce-extension = "0.1.2"
-aes-gcm = "0.10.0"
-getrandom = "0.2.2"
+nonce-extension = "0.2.0"
+aes-gcm = "0.10.3"
+getrandom = "0.2.12"
