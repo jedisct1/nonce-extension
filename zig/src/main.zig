@@ -89,9 +89,9 @@ pub fn nonceExtension(comptime BlockCipher: type, key: [BlockCipher.key_bits / 8
             var block0 = blocks[i * block_length ..];
             var block1 = blocks[(i + 3) * block_length ..];
             @memcpy(block0[0..n0.len], n0);
-            block0[block_length - 1] = i;
+            block0[block_length - 1] = 0 + i * 2;
             @memcpy(block1[0..n1.len], n1);
-            block1[block_length - 1] = i + 4;
+            block1[block_length - 1] = 1 + i * 2;
         }
         ks.encryptWide(blocks.len / block_length, &blocks, &blocks);
         mem.writeInt(
@@ -139,9 +139,9 @@ pub const XAes256Gcm = struct {
         associated_data: ?[]const u8,
     ) void {
         std.debug.assert(ciphertext.len == plaintext.len + ciphertext_overhead_length); // Ciphertext buffer length must be plaintext.len + XAes256Gcm.overheader_length
-        var nonce = ciphertext[0..nonce_length];
-        var c = ciphertext[nonce_length..][0..plaintext.len];
-        var tag = ciphertext[ciphertext.len - tag_length ..][0..tag_length];
+        const nonce = ciphertext[0..nonce_length];
+        const c = ciphertext[nonce_length..][0..plaintext.len];
+        const tag = ciphertext[ciphertext.len - tag_length ..][0..tag_length];
         std.crypto.random.bytes(nonce);
         const dk = nonceExtension(std.crypto.core.aes.Aes256, key, nonce);
         std.crypto.aead.aes_gcm.Aes256Gcm.encrypt(
