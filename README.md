@@ -20,4 +20,4 @@ When instantiated with `AES-128`, the `Derive-Key` construction derives a fresh 
 
 When instantiated with `AES-256`, the `Double-Nonce-Derive-Key` construction derives a fresh `AES-256` encryption key from a key and a nonce that can be up to 232 bits (but 192 is enough for all practical purposes). That encryption key can then be used with `AES-128-GCM`, along with a static nonce, and the guarantee that keys will never repeat.
 
-This repository contains easy-to-use implementations of these constructions.
+This repository contains easy-to-use implementations of these constructions (`aes256-gcm-dndk`, `aes128-gcm-dndk`).
