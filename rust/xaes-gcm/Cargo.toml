@@ -1,11 +1,11 @@
 [package]
 name = "xaes-gcm"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2021"
 readme = "README.md"
 authors = ["Frank Denis <github@pureftpd.org>"]
-keywords = ["crypto", "aes", "nonce", "derive", "key"]
-description = "The simplest and safest way to encrypt data using AES-GCM in Rust"
+keywords = ["crypto", "aes", "nonce", "dndk", "gcm"]
+description = "The simplest and safest way to encrypt data using AES-GCM in Rust (AES256-DNDK-GCM)"
 license = "ISC"
 homepage = "https://github.com/jedisct1/nonce-extension"
 repository = "https://github.com/jedisct1/nonce-extension"
