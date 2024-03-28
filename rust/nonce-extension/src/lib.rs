@@ -115,12 +115,12 @@ pub fn nonce_extension_aes256(key: impl AsRef<[u8]>, nonce: impl AsRef<[u8]>) ->
             {
                 let block0 = &mut blocks[i];
                 block0[..n0.len()].copy_from_slice(n0);
-                block0[BLOCK_LENGTH - 1] = i as _;
+                block0[BLOCK_LENGTH - 1] = (i * 2) as _;
             }
             {
                 let block1 = &mut blocks[i + 3];
                 block1[..n1.len()].copy_from_slice(n1);
-                block1[BLOCK_LENGTH - 1] = i as u8 + 4;
+                block1[BLOCK_LENGTH - 1] = (1 + i * 2) as _;
             }
         }
         ks.encrypt_blocks(&mut blocks);
@@ -161,7 +161,7 @@ fn nonce_derive_aes256() {
     .unwrap();
     let dk = nonce_extension_aes256(key, nonce);
     let expected_dk = Hex::decode_to_vec(
-        "545e7f545b925d46212c50e7df5ad33b8e650482a8e6476899ed6bb6f418e6d0",
+        "d05552b10c12ff00fbc94fdac8ca0220472d60b2af6b03e85b78725e5c052000",
         None,
     )
     .unwrap();
