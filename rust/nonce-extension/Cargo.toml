@@ -1,6 +1,6 @@
 [package]
 name = "nonce-extension"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 readme = "README.md"
 authors = ["Frank Denis <github@pureftpd.org>"]
@@ -15,4 +15,4 @@ categories = ["no-std", "cryptography", "wasm"]
 aes = "0.8.4"
 
 [dev-dependencies]
-ct-codecs = "1.1.1"
+ct-codecs = "1.1.6"

@@ -1,0 +1,14 @@
+.{
+    .name = .aes_dndk,
+    .version = "0.1.0",
+    .fingerprint = 0xbae4ab76d8b0699c,
+    .minimum_zig_version = "0.15.0",
+    .dependencies = .{},
+    .paths = .{
+        "build.zig",
+        "build.zig.zon",
+        "src",
+        "LICENSE",
+        "README.md",
+    },
+}

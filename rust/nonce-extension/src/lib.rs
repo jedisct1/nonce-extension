@@ -1,169 +1,316 @@
 #![no_std]
 
 use aes::cipher::{generic_array::GenericArray, BlockEncrypt, KeyInit};
-use aes::{Aes128, Aes256};
+use aes::Aes256;
 
 pub mod reexports {
     pub use aes;
 }
 
-/// Derive-Key-AES nonce extension mechanisms.
-///
-/// Extends the lifeftime of a cipher's secret key by deriving a new key from it and a nonce.
-///
-/// Usage with AES-128 (Derive-Key-AES-GCM):
-///
-/// ```rust
-/// use nonce_extension::*;
-/// let key = "128-bit key here";
-/// let nonce = "extended nonce!";
-/// let encryption_key = nonce_extension_aes128(key, nonce);
-/// let zero_nonce = [0u8; 12];
-/// // encrypt with `AES-GCM-128` using `encryption_key` and `zero_nonce`.
-/// ```
-///
-/// The nonce can be any length up to 120 bits (15 bytes).
-///
-/// This significantly extends the key lifetime and improves the security bounds of AES-GCM.
-///
-/// The nonce can be any length up to 232 bits, but for practical purposes, 192 bits (24 bytes)
-/// is recommended.
-///
-/// This allows the key to be reused without any practical limits on the number of messages,
-/// and nonce can be generated randomly without any risk of collision.
-///
-/// `key`: the secret key to derive from.
-/// `nonce`: the nonce to derive with.
-///
-/// Returns the derived key, suitable for AES-128-GCM and other AES-128 based ciphers.
-pub fn nonce_extension_aes128(key: impl AsRef<[u8]>, nonce: impl AsRef<[u8]>) -> [u8; 16] {
-    let key = key.as_ref();
-    let nonce = nonce.as_ref();
-    const KEY_LENGTH: usize = 16;
-    const BLOCK_LENGTH: usize = 16;
-    let nonce_length = nonce.len();
+/// DNDK-GCM result structure containing derived key and optional key commitment
+#[derive(Clone, Debug)]
+pub struct DndkResult {
+    /// The derived encryption key (32 bytes for AES-256)
+    pub key: [u8; 32],
+    /// The GCM initialization vector (12 bytes) - this is NTail from the spec
+    pub iv: [u8; 12],
+    /// Optional key commitment (32 bytes when enabled)
+    pub key_commitment: Option<[u8; 32]>,
+}
 
-    debug_assert!(KEY_LENGTH >= BLOCK_LENGTH);
-    debug_assert_eq!(KEY_LENGTH % BLOCK_LENGTH, 0);
+/// Derive function for DNDK-GCM according to draft-gueron-cfrg-dndkgcm-03
+///
+/// This implements the XORP construction from the IETF specification.
+///
+/// Parameters:
+/// - `root_key`: 32-byte AES-256 root key
+/// - `nonce`: 12 or 24 byte nonce
+/// - `kc_choice`: Enable key commitment (0 = disabled, 1 = enabled)
+///
+/// Returns: DndkResult with derived key, IV, and optional key commitment
+pub fn dndk_derive(root_key: &[u8; 32], nonce: &[u8], kc_choice: u8) -> DndkResult {
+    debug_assert!(
+        nonce.len() == 12 || nonce.len() == 24,
+        "Nonce must be 12 or 24 bytes"
+    );
+    debug_assert!(kc_choice <= 1, "KC_Choice must be 0 or 1");
 
-    let key_blocks = KEY_LENGTH / BLOCK_LENGTH;
+    // Pad nonce to 27 bytes
+    let mut npadded = [0u8; 27];
+    npadded[..nonce.len()].copy_from_slice(nonce);
 
-    let ks = Aes128::new(GenericArray::from_slice(key));
-    if key_blocks == 1 {
-        debug_assert!(nonce_length < BLOCK_LENGTH);
-        let z = GenericArray::from([0u8; 16]);
-        let mut blocks = [z; 3];
-        for (i, block) in blocks.iter_mut().enumerate() {
-            block[..nonce_length].copy_from_slice(nonce);
-            block[nonce_length] = i as _;
-        }
-        ks.encrypt_blocks(&mut blocks);
-        let x = u128::from_ne_bytes(blocks[0].into())
-            ^ u128::from_ne_bytes(blocks[1].into())
-            ^ u128::from_ne_bytes(blocks[2].into());
-        x.to_ne_bytes()
+    // Split into NHead (15 bytes) and NTail (12 bytes)
+    let nhead = &npadded[0..15];
+    let ntail: [u8; 12] = npadded[15..27].try_into().unwrap();
+
+    // Calculate ConfigByte
+    let ln = nonce.len();
+    let config_byte = 128u8 * kc_choice + 8u8 * ((ln - 12) as u8);
+
+    // Initialize AES-256 with root key
+    let cipher = Aes256::new(GenericArray::from_slice(root_key));
+
+    // Prepare blocks B0, B1, B2 (and optionally B3, B4)
+    let num_blocks = if kc_choice == 1 { 5 } else { 3 };
+    let mut blocks = [[0u8; 16]; 5];
+
+    for (i, block) in blocks.iter_mut().enumerate().take(num_blocks) {
+        block[..15].copy_from_slice(nhead);
+        block[15] = config_byte + i as u8;
+    }
+
+    // Encrypt all blocks
+    let mut encrypted = [GenericArray::from([0u8; 16]); 5];
+    for i in 0..num_blocks {
+        encrypted[i].copy_from_slice(&blocks[i]);
+    }
+    cipher.encrypt_blocks(&mut encrypted[..num_blocks]);
+
+    // X0 = encrypted[0], X1 = encrypted[1], X2 = encrypted[2], etc.
+    let x0 = u128::from_be_bytes(encrypted[0].into());
+    let x1 = u128::from_be_bytes(encrypted[1].into());
+    let x2 = u128::from_be_bytes(encrypted[2].into());
+
+    // Compute derived key: Y1 = X1 XOR X0, Y2 = X2 XOR X0
+    let y1 = x1 ^ x0;
+    let y2 = x2 ^ x0;
+
+    let mut derived_key = [0u8; 32];
+    derived_key[..16].copy_from_slice(&y1.to_be_bytes());
+    derived_key[16..].copy_from_slice(&y2.to_be_bytes());
+
+    // Compute key commitment if requested
+    let key_commitment = if kc_choice == 1 {
+        let x3 = u128::from_be_bytes(encrypted[3].into());
+        let x4 = u128::from_be_bytes(encrypted[4].into());
+        let y3 = x3 ^ x0;
+        let y4 = x4 ^ x0;
+
+        let mut kc = [0u8; 32];
+        kc[..16].copy_from_slice(&y3.to_be_bytes());
+        kc[16..].copy_from_slice(&y4.to_be_bytes());
+        Some(kc)
     } else {
-        unreachable!("Nonce extension mechanism is incompatible with that key size")
+        None
+    };
+
+    DndkResult {
+        key: derived_key,
+        iv: ntail,
+        key_commitment,
     }
 }
 
-/// Double-Nonce-Derive-Key-AES nonce extension mechanism.
+/// Primary interface for DNDK-GCM encryption key derivation
 ///
-/// Extends the lifeftime of a cipher's secret key by deriving a new key from it and a nonce.
+/// Derives a 32-byte AES-256-GCM key from a root key and nonce
+/// according to the IETF draft specification.
 ///
-/// Usage with AES-256 (Double-Nonce-Derive-Key-AES-GCM):
+/// Parameters:
+/// - `root_key`: 32-byte AES-256 root key
+/// - `nonce`: 12 or 24 byte nonce
 ///
-/// ```rust
-/// use nonce_extension::*;
-/// let key = "-------- A 256-bit key! --------";
-/// let nonce = "*A random 192-bit nonce*";
-/// let encryption_key = nonce_extension_aes256(key, nonce);
-/// let zero_nonce = [0u8; 12];
-/// // encrypt with `AES-GCM-256` using `encryption_key` and `zero_nonce`.
-/// ```
-///
-/// The nonce can be any length up to 232 bits, but for practical purposes, 192 bits (24 bytes)
-/// is recommended.
-///
-/// This allows the key to be reused without any practical limits on the number of messages,
-/// and nonce can be generated randomly without any risk of collision.
-///
-/// `key`: the secret key to derive from.
-/// `nonce`: the nonce to derive with.
-///
-/// Returns the derived key, suitable for AES-256-GCM and other AES-256 based ciphers
-pub fn nonce_extension_aes256(key: impl AsRef<[u8]>, nonce: impl AsRef<[u8]>) -> [u8; 32] {
-    let key = key.as_ref();
-    let nonce = nonce.as_ref();
-    const KEY_LENGTH: usize = 32;
-    const BLOCK_LENGTH: usize = 16;
-    let nonce_length = nonce.len();
-
-    debug_assert!(KEY_LENGTH >= BLOCK_LENGTH);
-    debug_assert_eq!(KEY_LENGTH % BLOCK_LENGTH, 0);
-
-    let key_blocks = KEY_LENGTH / BLOCK_LENGTH;
-
-    let ks = Aes256::new(GenericArray::from_slice(key));
-    if key_blocks == 2 {
-        debug_assert!(nonce_length < BLOCK_LENGTH * 2);
-        let z = GenericArray::from([0u8; 16]);
-        let n0 = &nonce[..nonce_length / 2];
-        let n1 = &nonce[nonce_length / 2..];
-        let mut blocks = [z; 6];
-        for i in 0..3 {
-            {
-                let block0 = &mut blocks[i];
-                block0[..n0.len()].copy_from_slice(n0);
-                block0[BLOCK_LENGTH - 1] = (i * 2) as _;
-            }
-            {
-                let block1 = &mut blocks[i + 3];
-                block1[..n1.len()].copy_from_slice(n1);
-                block1[BLOCK_LENGTH - 1] = (1 + i * 2) as _;
-            }
-        }
-        ks.encrypt_blocks(&mut blocks);
-        let x0 = u128::from_ne_bytes(blocks[0].into())
-            ^ u128::from_ne_bytes(blocks[1].into())
-            ^ u128::from_ne_bytes(blocks[2].into());
-        let x1 = u128::from_ne_bytes(blocks[3].into())
-            ^ u128::from_ne_bytes(blocks[4].into())
-            ^ u128::from_ne_bytes(blocks[5].into());
-        let mut dk = [0u8; KEY_LENGTH];
-        dk[..BLOCK_LENGTH].copy_from_slice(&x0.to_ne_bytes());
-        dk[BLOCK_LENGTH..].copy_from_slice(&x1.to_ne_bytes());
-        dk
-    } else {
-        unreachable!("Nonce extension mechanism is incompatible with that key size")
-    }
+/// Returns: 32-byte derived key for use with AES-256-GCM
+pub fn nonce_extension_aes256(root_key: &[u8; 32], nonce: &[u8]) -> [u8; 32] {
+    dndk_derive(root_key, nonce, 0).key
 }
 
 #[test]
-fn nonce_derive_aes128() {
-    use ct_codecs::{Decoder, Hex};
-    let nonce = Hex::decode_to_vec("0123456789abcdeffedcba98765432", None).unwrap();
-    let key = Hex::decode_to_vec("0123456789abcdeffedcba9876543210", None).unwrap();
-    let dk = nonce_extension_aes128(key, nonce);
-    let expected_dk = Hex::decode_to_vec("5f52f039f349f01c7969019c0d19878d", None).unwrap();
-    assert_eq!(&dk[..], &expected_dk);
+fn test_dndk_derive_12_byte_nonce() {
+    // Test with 12-byte nonce, no key commitment
+    let key: [u8; 32] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xff, 0xed, 0xcb, 0xa9, 0x87, 0x65, 0x43,
+        0x21, 0x0f,
+    ];
+    let nonce = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 0);
+
+    // Verify the result structure
+    assert_eq!(result.key.len(), 32);
+    assert_eq!(result.iv.len(), 12);
+    assert!(result.key_commitment.is_none());
 }
 
 #[test]
-fn nonce_derive_aes256() {
-    use ct_codecs::{Decoder, Hex};
-    let nonce =
-        Hex::decode_to_vec("0123456789abcdeffedcba987654321089abcdeffedcba98", None).unwrap();
-    let key = Hex::decode_to_vec(
-        "0123456789abcdeffedcba9876543210123456789abcdeffedcba9876543210f",
-        None,
-    )
-    .unwrap();
-    let dk = nonce_extension_aes256(key, nonce);
-    let expected_dk = Hex::decode_to_vec(
-        "d05552b10c12ff00fbc94fdac8ca0220472d60b2af6b03e85b78725e5c052000",
-        None,
-    )
-    .unwrap();
-    assert_eq!(&dk[..], &expected_dk);
+fn test_dndk_derive_24_byte_nonce() {
+    // Test with 24-byte nonce, with key commitment
+    let key: [u8; 32] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xff, 0xed, 0xcb, 0xa9, 0x87, 0x65, 0x43,
+        0x21, 0x0f,
+    ];
+    let nonce = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 1);
+
+    // Verify the result structure
+    assert_eq!(result.key.len(), 32);
+    assert_eq!(result.iv.len(), 12);
+    assert!(result.key_commitment.is_some());
+    assert_eq!(result.key_commitment.unwrap().len(), 32);
+}
+
+#[test]
+fn test_nonce_extension_aes256() {
+    // Test the convenience function
+    let key: [u8; 32] = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98, 0x76, 0x54, 0x32,
+        0x10, 0x12, 0x34, 0x56, 0x78, 0x9a, 0xbc, 0xde, 0xff, 0xed, 0xcb, 0xa9, 0x87, 0x65, 0x43,
+        0x21, 0x0f,
+    ];
+    let nonce = [
+        0x01, 0x23, 0x45, 0x67, 0x89, 0xab, 0xcd, 0xef, 0xfe, 0xdc, 0xba, 0x98,
+    ];
+
+    let derived_key = nonce_extension_aes256(&key, &nonce);
+    assert_eq!(derived_key.len(), 32);
+
+    // Should match the key from dndk_derive
+    let result = dndk_derive(&key, &nonce, 0);
+    assert_eq!(derived_key, result.key);
+}
+
+// Official IETF Test Vectors from draft-gueron-cfrg-dndkgcm-03
+
+#[test]
+fn test_vector_a1_24byte_nonce_with_kc() {
+    // Test Vector A1: LN = 24, KC_Choice = 1
+    let key: [u8; 32] = [
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 1);
+
+    // Expected derived key
+    let expected_key = [
+        0x3d, 0x14, 0x80, 0xee, 0x39, 0xa9, 0x68, 0xd5, 0x81, 0xd1, 0x6a, 0x57, 0x8b, 0xda, 0xf0,
+        0xe6, 0x71, 0x9d, 0xcf, 0xff, 0x6e, 0x12, 0x7b, 0x40, 0xbb, 0xdd, 0x84, 0x4a, 0xcc, 0xea,
+        0x7e, 0x1c,
+    ];
+
+    // Expected GCM IV
+    let expected_iv = [
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x00, 0x00, 0x00,
+    ];
+
+    // Expected key commitment
+    let expected_kc = [
+        0x2b, 0xaf, 0x00, 0xef, 0xd2, 0x98, 0xde, 0x13, 0x05, 0x5c, 0x9a, 0x6c, 0x39, 0xe0, 0x5a,
+        0xee, 0x57, 0x15, 0x83, 0x38, 0x43, 0x57, 0x63, 0x5e, 0x14, 0x4f, 0xa2, 0x14, 0x44, 0x23,
+        0x99, 0x68,
+    ];
+
+    assert_eq!(result.key, expected_key);
+    assert_eq!(result.iv, expected_iv);
+    assert_eq!(result.key_commitment.unwrap(), expected_kc);
+}
+
+#[test]
+fn test_vector_a2_24byte_nonce_no_kc() {
+    // Test Vector A2: LN = 24, KC_Choice = 0
+    let key: [u8; 32] = [
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e,
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 0);
+
+    // Expected derived key
+    let expected_key = [
+        0xd9, 0x74, 0xa4, 0x6f, 0xbb, 0xeb, 0x3d, 0xec, 0x95, 0x3c, 0xe0, 0x88, 0xef, 0x6b, 0x60,
+        0x85, 0x73, 0x24, 0x89, 0x47, 0xac, 0xf5, 0x16, 0x06, 0xde, 0x5a, 0x1e, 0x5b, 0x72, 0x62,
+        0x91, 0x97,
+    ];
+
+    // Expected GCM IV
+    let expected_iv = [
+        0x0f, 0x10, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16, 0x17, 0x00, 0x00, 0x00,
+    ];
+
+    assert_eq!(result.key, expected_key);
+    assert_eq!(result.iv, expected_iv);
+    assert!(result.key_commitment.is_none());
+}
+
+#[test]
+fn test_vector_a3_12byte_nonce_with_kc() {
+    // Test Vector A3: LN = 12, KC_Choice = 1
+    let key: [u8; 32] = [
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 1);
+
+    // Expected derived key
+    let expected_key = [
+        0xdf, 0xde, 0x3c, 0x72, 0x1b, 0xe6, 0xe0, 0xb0, 0x36, 0x97, 0x70, 0x78, 0x89, 0x41, 0xa2,
+        0x93, 0x96, 0xc4, 0xe5, 0x0d, 0xd8, 0x17, 0x25, 0xd3, 0x83, 0x22, 0x21, 0xfa, 0x47, 0xd5,
+        0x64, 0xe1,
+    ];
+
+    // Expected GCM IV (all zeros for 12-byte nonce)
+    let expected_iv = [0u8; 12];
+
+    // Expected key commitment
+    let expected_kc = [
+        0x67, 0x5f, 0xb3, 0xec, 0x6d, 0x0e, 0x56, 0x00, 0x23, 0x33, 0xc2, 0x50, 0x4d, 0x1b, 0x70,
+        0xdb, 0x47, 0xc3, 0x71, 0x37, 0x75, 0x99, 0x9c, 0x96, 0x00, 0xbe, 0xdc, 0xfd, 0xa7, 0x6f,
+        0x8d, 0x8c,
+    ];
+
+    assert_eq!(result.key, expected_key);
+    assert_eq!(result.iv, expected_iv);
+    assert_eq!(result.key_commitment.unwrap(), expected_kc);
+}
+
+#[test]
+fn test_vector_a4_12byte_nonce_no_kc() {
+    // Test Vector A4: LN = 12, KC_Choice = 0
+    let key: [u8; 32] = [
+        0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+        0x00, 0x00,
+    ];
+    let nonce = [
+        0x00, 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0a, 0x0b,
+    ];
+
+    let result = dndk_derive(&key, &nonce, 0);
+
+    // Expected derived key
+    let expected_key = [
+        0x13, 0xc3, 0x1b, 0xca, 0xf1, 0xf1, 0x17, 0x85, 0xe1, 0xdc, 0xb2, 0x9d, 0x5d, 0x65, 0x54,
+        0x1a, 0x4b, 0x37, 0x1b, 0x11, 0x42, 0xbb, 0x60, 0xf3, 0x9c, 0xea, 0x82, 0x3f, 0x18, 0x9e,
+        0x0a, 0x17,
+    ];
+
+    // Expected GCM IV (all zeros for 12-byte nonce)
+    let expected_iv = [0u8; 12];
+
+    assert_eq!(result.key, expected_key);
+    assert_eq!(result.iv, expected_iv);
+    assert!(result.key_commitment.is_none());
 }

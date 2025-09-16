@@ -1,6 +1,6 @@
 [package]
 name = "xaes-gcm"
-version = "0.2.0"
+version = "0.3.0"
 edition = "2021"
 readme = "README.md"
 authors = ["Frank Denis <github@pureftpd.org>"]
@@ -12,6 +12,6 @@ repository = "https://github.com/jedisct1/nonce-extension"
 categories = ["no-std", "cryptography", "wasm"]
 
 [dependencies]
-nonce-extension = "0.2.0"
+nonce-extension = "0.3.0"
 aes-gcm = "0.10.3"
 getrandom = "0.2.12"

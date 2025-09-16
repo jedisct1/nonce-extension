@@ -4,13 +4,13 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    _ = b.addModule("nonce-extension", .{
+    _ = b.addModule("aes_dndk", .{
         .root_source_file = b.path("src/main.zig"),
     });
 
     const lib = b.addLibrary(.{
         .linkage = .static,
-        .name = "nonce-extension",
+        .name = "aes_dndk",
         .root_module = b.createModule(.{
             .target = target,
             .optimize = optimize,
