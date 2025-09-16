@@ -5,23 +5,26 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     _ = b.addModule("nonce-extension", .{
-        .root_source_file = .{ .path = "src/main.zig" },
+        .root_source_file = b.path("src/main.zig"),
     });
 
-    const lib = b.addStaticLibrary(.{
+    const lib = b.addLibrary(.{
+        .linkage = .static,
         .name = "nonce-extension",
-        .root_source_file = .{ .path = "src/main.zig" },
-        .target = target,
-        .optimize = optimize,
+        .root_module = b.createModule(.{
+            .target = target,
+            .optimize = optimize,
+            .root_source_file = b.path("src/main.zig"),
+        }),
     });
 
     b.installArtifact(lib);
 
-    const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/main.zig" },
+    const main_tests = b.addTest(.{ .root_module = b.createModule(.{
+        .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
-    });
+    }) });
 
     const run_main_tests = b.addRunArtifact(main_tests);
 
