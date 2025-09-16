@@ -65,7 +65,7 @@ impl XAes256Gcm {
         let plaintext = plaintext.as_ref();
         let mut nonce = [0u8; 24];
         getrandom(&mut nonce).unwrap();
-        let dk = nonce_extension_aes256(key, nonce);
+        let dk = nonce_extension_aes256(key, &nonce);
         let ks = Aes256Gcm::new((&dk).into());
         let mut out = Vec::with_capacity(nonce.len() + plaintext.len() + 16);
         out.extend_from_slice(&nonce);
