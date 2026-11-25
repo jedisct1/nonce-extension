@@ -37,7 +37,7 @@ pub const DndkGcm = struct {
         std.debug.assert(nonce.len >= min_nonce_length and nonce.len <= max_nonce_length);
 
         // Step 1: Pad nonce to 27 bytes
-        var npadded: [27]u8 = [_]u8{0} ** 27;
+        var npadded: [27]u8 = @splat(0);
         @memcpy(npadded[0..nonce.len], nonce);
 
         // Step 2: Split into NHead (15 bytes) and NTail (12 bytes)
