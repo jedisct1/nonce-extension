@@ -7,7 +7,6 @@ authors = ["Frank Denis <github@pureftpd.org>"]
 keywords = ["crypto", "aes", "nonce", "dndk", "gcm"]
 description = "The simplest and safest way to encrypt data using AES-GCM in Rust (AES256-DNDK-GCM)"
 license = "ISC"
-homepage = "https://github.com/jedisct1/nonce-extension"
 repository = "https://github.com/jedisct1/nonce-extension"
 categories = ["no-std", "cryptography", "wasm"]
 

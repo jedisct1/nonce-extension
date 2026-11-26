@@ -7,7 +7,6 @@ authors = ["Frank Denis <github@pureftpd.org>"]
 keywords = ["crypto", "aes", "nonce", "dndk", "gcm"]
 description = "Derive-Key-AES and Double-Nonce-Derive-Key-AES nonce extension mechanisms (DNDK-GCM)"
 license = "ISC"
-homepage = "https://github.com/jedisct1/nonce-extension"
 repository = "https://github.com/jedisct1/nonce-extension"
 categories = ["no-std", "cryptography", "wasm"]
 
